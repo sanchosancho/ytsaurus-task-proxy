@@ -20,7 +20,7 @@ func render(t *testing.T, values string) (map[string]map[string]any, error) {
 	command := exec.Command("helm", "template", "logs", "../../chart", "--namespace", "tests", "-f", path)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return nil, &renderError{string(output)}
+		return nil, &renderError{output: string(output)}
 	}
 	documents := map[string]map[string]any{}
 	decoder := yaml.NewDecoder(strings.NewReader(string(output)))
@@ -40,10 +40,18 @@ func render(t *testing.T, values string) (map[string]map[string]any, error) {
 	return documents, nil
 }
 
-type renderError struct{ output string }
+type renderError struct {
+	output string
+}
 
-func (e *renderError) Error() string   { return e.output }
-func mapping(value any) map[string]any { return value.(map[string]any) }
+func (e *renderError) Error() string {
+	return e.output
+}
+
+func mapping(value any) map[string]any {
+	return value.(map[string]any)
+}
+
 func container(pod map[string]any, name string) map[string]any {
 	for _, c := range pod["containers"].([]any) {
 		m := mapping(c)
@@ -53,6 +61,7 @@ func container(pod map[string]any, name string) map[string]any {
 	}
 	panic(name)
 }
+
 func mounted(c map[string]any, name, path string) bool {
 	for _, v := range c["volumeMounts"].([]any) {
 		m := mapping(v)
@@ -63,6 +72,7 @@ func mounted(c map[string]any, name, path string) bool {
 	}
 	return false
 }
+
 func runtimeConfig(t *testing.T, docs map[string]map[string]any) taskproxy.LoggingConfig {
 	t.Helper()
 	require.NotContains(t, mapping(docs["ConfigMap/logs-config"]["metadata"]), "logging.yaml", "logging content belongs only in ConfigMap data")
@@ -75,17 +85,96 @@ func runtimeConfig(t *testing.T, docs map[string]map[string]any) taskproxy.Loggi
 	require.NoError(t, err)
 	return cfg
 }
+
 func TestChartLoggingAndIndependentPersistence(t *testing.T) {
 	for _, tc := range []struct {
-		name, values, server, proxy, access string
+		name   string
+		values string
+		server string
+		proxy  string
+		access string
 	}{
-		{"default", "", "stderr", "stderr", "stderr"},
-		{"stdout", "server:\n  logging:\n    writerType: stdout\nproxy:\n  logging:\n    writerType: stdout\n  accessLog:\n    writerType: stdout\n", "stdout", "stdout", "stdout"},
-		{"server file", "server:\n  logging:\n    writerType: file\n", "file", "stderr", "stderr"},
-		{"envoy file", "proxy:\n  logging:\n    writerType: file\n", "stderr", "file", "stderr"},
-		{"access file", "proxy:\n  accessLog:\n    writerType: file\n", "stderr", "stderr", "file"},
-		{"all files TLS replicas", "replicas: 3\ntls:\n  enabled: true\nserver:\n  logging:\n    writerType: file\nproxy:\n  logging:\n    writerType: file\n  accessLog:\n    writerType: file\n", "file", "file", "file"},
-		{"disabled access", "proxy:\n  accessLog:\n    enabled: false\n    writerType: file\n", "stderr", "stderr", "file"},
+		{
+			name:   "default",
+			values: "",
+			server: "stderr",
+			proxy:  "stderr",
+			access: "stderr",
+		},
+		{
+			name: "stdout",
+			values: `server:
+  logging:
+    writerType: stdout
+proxy:
+  logging:
+    writerType: stdout
+  accessLog:
+    writerType: stdout
+`,
+			server: "stdout",
+			proxy:  "stdout",
+			access: "stdout",
+		},
+		{
+			name: "server file",
+			values: `server:
+  logging:
+    writerType: file
+`,
+			server: "file",
+			proxy:  "stderr",
+			access: "stderr",
+		},
+		{
+			name: "envoy file",
+			values: `proxy:
+  logging:
+    writerType: file
+`,
+			server: "stderr",
+			proxy:  "file",
+			access: "stderr",
+		},
+		{
+			name: "access file",
+			values: `proxy:
+  accessLog:
+    writerType: file
+`,
+			server: "stderr",
+			proxy:  "stderr",
+			access: "file",
+		},
+		{
+			name: "all files TLS replicas",
+			values: `replicas: 3
+tls:
+  enabled: true
+server:
+  logging:
+    writerType: file
+proxy:
+  logging:
+    writerType: file
+  accessLog:
+    writerType: file
+`,
+			server: "file",
+			proxy:  "file",
+			access: "file",
+		},
+		{
+			name: "disabled access",
+			values: `proxy:
+  accessLog:
+    enabled: false
+    writerType: file
+`,
+			server: "stderr",
+			proxy:  "stderr",
+			access: "file",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			docs, err := render(t, tc.values)
@@ -147,8 +236,18 @@ func TestChartLoggingAndIndependentPersistence(t *testing.T) {
 		})
 	}
 }
+
 func TestChartCustomPolicyAndConfigChecksum(t *testing.T) {
-	docs, err := render(t, "server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      maxSegmentSize: 8Mi\n      maxSegmentCountToKeep: 3\npersistence:\n  storageClass: fast\n  size: 2Gi\n")
+	docs, err := render(t, `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      maxSegmentSize: 8Mi
+      maxSegmentCountToKeep: 3
+persistence:
+  storageClass: fast
+  size: 2Gi
+`)
 	require.NoError(t, err)
 	cfg := runtimeConfig(t, docs)
 	require.EqualValues(t, 0, cfg.Server.RotationPolicy.RotationPeriodMilliseconds)
@@ -163,36 +262,128 @@ func TestChartCustomPolicyAndConfigChecksum(t *testing.T) {
 	}
 	require.NotEqual(t, annotation(defaults), annotation(docs))
 }
+
 func TestChartRejectsInvalidLogging(t *testing.T) {
-	for _, values := range []string{
-		"server:\n  logging:\n    writerType: bad\n", "proxy:\n  logging:\n    minLogLevel: warn\n", "proxy:\n  accessLog:\n    minLogLevel: info\n",
-		"server:\n  logging:\n    rotationPolicy:\n      maxSegmentSize: 10Mi\n      maxSegmentCountToKeep: 2\n",
-		"server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      maxSegmentSize: 10Mi\n",
-		"server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      maxSegmentCountToKeep: 2\n",
-		"server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      rotationPeriodMilliseconds: 0\n      maxSegmentCountToKeep: 2\n",
-		"server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      maxSegmentSize: -1\n      maxSegmentCountToKeep: 2\n",
-		"server:\n  logging:\n    writerType: file\n    rotationPolicy:\n      maxSegmentSize: 8Mi\n      maxSegmentCountToKeep: 2\n      unknown: 1\n",
-		"persistence:\n  existingClaim: shared\n",
+	for _, tc := range []struct {
+		name   string
+		values string
+	}{
+		{
+			name: "invalid server writer",
+			values: `server:
+  logging:
+    writerType: bad
+`,
+		},
+		{
+			name: "invalid proxy level",
+			values: `proxy:
+  logging:
+    minLogLevel: warn
+`,
+		},
+		{
+			name: "access log level unsupported",
+			values: `proxy:
+  accessLog:
+    minLogLevel: info
+`,
+		},
+		{
+			name: "console rotation policy",
+			values: `server:
+  logging:
+    rotationPolicy:
+      maxSegmentSize: 10Mi
+      maxSegmentCountToKeep: 2
+`,
+		},
+		{
+			name: "missing retention bound",
+			values: `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      maxSegmentSize: 10Mi
+`,
+		},
+		{
+			name: "missing rotation trigger",
+			values: `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      maxSegmentCountToKeep: 2
+`,
+		},
+		{
+			name: "zero rotation period",
+			values: `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      rotationPeriodMilliseconds: 0
+      maxSegmentCountToKeep: 2
+`,
+		},
+		{
+			name: "negative segment size",
+			values: `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      maxSegmentSize: -1
+      maxSegmentCountToKeep: 2
+`,
+		},
+		{
+			name: "unknown rotation field",
+			values: `server:
+  logging:
+    writerType: file
+    rotationPolicy:
+      maxSegmentSize: 8Mi
+      maxSegmentCountToKeep: 2
+      unknown: 1
+`,
+		},
+		{
+			name: "shared claim unsupported",
+			values: `persistence:
+  existingClaim: shared
+`,
+		},
 	} {
-		t.Run(strings.ReplaceAll(values, "\n", "/"), func(t *testing.T) { _, err := render(t, values); require.Error(t, err) })
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := render(t, tc.values)
+			require.Error(t, err)
+		})
 	}
 }
 
 func TestChartLoggingToggleKeepsClaimsAndStorageClassSemantics(t *testing.T) {
 	defaults, err := render(t, "")
 	require.NoError(t, err)
-	files, err := render(t, "server:\n  logging:\n    writerType: file\n")
+	files, err := render(t, `server:
+  logging:
+    writerType: file
+`)
 	require.NoError(t, err)
 	defaultClaims := mapping(defaults["StatefulSet/logs"]["spec"])["volumeClaimTemplates"]
 	require.Equal(t, defaultClaims, mapping(files["StatefulSet/logs"]["spec"])["volumeClaimTemplates"], "StatefulSet claim templates must remain unchanged when logging mode toggles")
 	_, exists := mapping(mapping(defaultClaims.([]any)[0])["spec"])["storageClassName"]
 	require.False(t, exists, "null uses cluster default")
-	empty, err := render(t, "persistence:\n  storageClass: \"\"\n")
+	empty, err := render(t, `persistence:
+  storageClass: ""
+`)
 	require.NoError(t, err)
 	require.Equal(t, "", mapping(mapping(mapping(empty["StatefulSet/logs"]["spec"])["volumeClaimTemplates"].([]any)[0])["spec"])["storageClassName"])
 	cfg := runtimeConfig(t, files)
 	require.True(t, cfg.AccessLog.Enabled)
-	disabled, err := render(t, "proxy:\n  accessLog:\n    enabled: false\n")
+	disabled, err := render(t, `proxy:
+  accessLog:
+    enabled: false
+`)
 	require.NoError(t, err)
 	require.False(t, runtimeConfig(t, disabled).AccessLog.Enabled, "explicit false must remain false")
 }

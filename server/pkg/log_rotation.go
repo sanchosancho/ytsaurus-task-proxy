@@ -23,6 +23,7 @@ type rotatingLog struct {
 	pending   string
 	protected string
 }
+
 type logArchive struct {
 	path string
 	size int64
@@ -38,6 +39,7 @@ func regularLogInfo(path string) (os.FileInfo, error) {
 	}
 	return info, nil
 }
+
 func openLogFile(path string) (*os.File, error) {
 	fd, err := syscall.Open(path, syscall.O_WRONLY|syscall.O_APPEND|syscall.O_CREAT|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0640)
 	if err != nil {
@@ -51,6 +53,7 @@ func openLogFile(path string) (*os.File, error) {
 	}
 	return file, nil
 }
+
 func (s *rotatingLog) archives() ([]logArchive, error) {
 	directory := filepath.Dir(s.path)
 	entries, err := os.ReadDir(directory)
@@ -70,11 +73,17 @@ func (s *rotatingLog) archives() ([]logArchive, error) {
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		result = append(result, logArchive{filepath.Join(directory, entry.Name()), info.Size()})
+		result = append(result, logArchive{
+			path: filepath.Join(directory, entry.Name()),
+			size: info.Size(),
+		})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].path < result[j].path })
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].path < result[j].path
+	})
 	return result, nil
 }
+
 func (s *rotatingLog) rename(now time.Time) (string, error) {
 	archives, err := s.archives()
 	if err != nil {
@@ -116,6 +125,7 @@ func (s *rotatingLog) rename(now time.Time) (string, error) {
 	}
 	return "", fmt.Errorf("could not reserve log archive name")
 }
+
 func (s *rotatingLog) due(now time.Time) (bool, error) {
 	info, err := regularLogInfo(s.path)
 	if os.IsNotExist(err) {
@@ -129,6 +139,7 @@ func (s *rotatingLog) due(now time.Time) (bool, error) {
 	}
 	return s.policy.MaxSegmentSize > 0 && info.Size() >= int64(s.policy.MaxSegmentSize) || s.policy.RotationPeriodMilliseconds > 0 && now.Sub(s.since) >= time.Duration(s.policy.RotationPeriodMilliseconds)*time.Millisecond, nil
 }
+
 func (s *rotatingLog) prune() error {
 	archives, err := s.archives()
 	if err != nil {
@@ -248,6 +259,7 @@ func (l *Logging) rotate(now time.Time) {
 		}
 	}
 }
+
 func (l *Logging) reopenServer(stream *rotatingLog, now time.Time) error {
 	file, err := openLogFile(stream.path)
 	if err != nil {

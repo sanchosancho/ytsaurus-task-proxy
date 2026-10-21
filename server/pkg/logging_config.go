@@ -81,7 +81,21 @@ func (q *ByteQuantity) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func DefaultLoggingConfig() LoggingConfig {
-	return LoggingConfig{Directory: DefaultLogDirectory, Server: LogConfig{WriterType: "stderr", MinLogLevel: "debug"}, Proxy: LogConfig{WriterType: "stderr", MinLogLevel: "info"}, AccessLog: AccessLogConfig{Enabled: true, WriterType: "stderr"}}
+	return LoggingConfig{
+		Directory: DefaultLogDirectory,
+		Server: LogConfig{
+			WriterType:  "stderr",
+			MinLogLevel: "debug",
+		},
+		Proxy: LogConfig{
+			WriterType:  "stderr",
+			MinLogLevel: "info",
+		},
+		AccessLog: AccessLogConfig{
+			Enabled:    true,
+			WriterType: "stderr",
+		},
+	}
 }
 
 func LoadLoggingConfig(path string) (LoggingConfig, error) {
@@ -201,12 +215,15 @@ func logPath(directory, name, writer string) string {
 		return filepath.Join(directory, name)
 	}
 }
+
 func (c LoggingConfig) ServerLogPath() string {
 	return logPath(c.Directory, "server.log", c.Server.WriterType)
 }
+
 func (c LoggingConfig) ProxyLogPath() string {
 	return logPath(c.Directory, "envoy.log", c.Proxy.WriterType)
 }
+
 func (c LoggingConfig) AccessLogPath() string {
 	return logPath(c.Directory, "access.log", c.AccessLog.WriterType)
 }

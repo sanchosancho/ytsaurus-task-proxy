@@ -49,7 +49,7 @@ const (
 	serviceRouteHeaderName         = "x-yt-taskproxy-service"
 )
 
-func ServeGRPC(s serverv3.Server, authServer *authServer, logger ...*SimpleLogger) error {
+func ServeGRPC(s serverv3.Server, authServer *authServer, logger *SimpleLogger) error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", serverPort))
 	if err != nil {
 		return err
@@ -62,11 +62,9 @@ func ServeGRPC(s serverv3.Server, authServer *authServer, logger ...*SimpleLogge
 
 	authv3.RegisterAuthorizationServer(gs, authServer)
 
-	startupLogger := &SimpleLogger{}
-	if len(logger) > 0 && logger[0] != nil {
-		startupLogger = logger[0]
+	if logger != nil {
+		logger.Infof("xDS + extAuthz starts listening on :%d", serverPort)
 	}
-	startupLogger.Infof("xDS + extAuthz starts listening on :%d", serverPort)
 
 	return gs.Serve(lis)
 }

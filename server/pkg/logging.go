@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-var logLevels = map[string]int{"trace": 0, "debug": 1, "info": 2, "warning": 3, "error": 4}
+var logLevels = map[string]int{
+	"trace":   0,
+	"debug":   1,
+	"info":    2,
+	"warning": 3,
+	"error":   4,
+}
 
 type logState struct {
 	mu      sync.Mutex
@@ -21,7 +27,9 @@ type logState struct {
 }
 
 // SimpleLogger keeps its zero-value stderr/debug behavior and value-method xDS compatibility.
-type SimpleLogger struct{ state *logState }
+type SimpleLogger struct {
+	state *logState
+}
 
 func (l SimpleLogger) write(level int, label, format string, args ...any) {
 	if l.state == nil {
@@ -41,11 +49,26 @@ func (l SimpleLogger) write(level int, label, format string, args ...any) {
 		loggingError("write server log: %v", err)
 	}
 }
-func (l SimpleLogger) Tracef(format string, args ...any) { l.write(0, "TRACE", format, args...) }
-func (l SimpleLogger) Debugf(format string, args ...any) { l.write(1, "DEBUG", format, args...) }
-func (l SimpleLogger) Infof(format string, args ...any)  { l.write(2, "INFO", format, args...) }
-func (l SimpleLogger) Warnf(format string, args ...any)  { l.write(3, "WARN", format, args...) }
-func (l SimpleLogger) Errorf(format string, args ...any) { l.write(4, "ERROR", format, args...) }
+
+func (l SimpleLogger) Tracef(format string, args ...any) {
+	l.write(0, "TRACE", format, args...)
+}
+
+func (l SimpleLogger) Debugf(format string, args ...any) {
+	l.write(1, "DEBUG", format, args...)
+}
+
+func (l SimpleLogger) Infof(format string, args ...any) {
+	l.write(2, "INFO", format, args...)
+}
+
+func (l SimpleLogger) Warnf(format string, args ...any) {
+	l.write(3, "WARN", format, args...)
+}
+
+func (l SimpleLogger) Errorf(format string, args ...any) {
+	l.write(4, "ERROR", format, args...)
+}
 
 // Logging owns server output and the shared rotation lifecycle. External files are opened by Envoy.
 type Logging struct {
@@ -62,7 +85,12 @@ func NewLogging(config LoggingConfig) (*Logging, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-	l := &Logging{state: &logState{minimum: logLevels[config.Server.MinLogLevel]}, done: make(chan struct{})}
+	l := &Logging{
+		state: &logState{
+			minimum: logLevels[config.Server.MinLogLevel],
+		},
+		done: make(chan struct{}),
+	}
 	l.logger = &SimpleLogger{state: l.state}
 	l.reopen = reopenEnvoyLogs
 	switch config.Server.WriterType {
@@ -76,9 +104,27 @@ func NewLogging(config LoggingConfig) (*Logging, error) {
 		policy            *RotationPolicy
 		external, enabled bool
 	}{
-		{config.ServerLogPath(), config.Server.WriterType, config.Server.RotationPolicy, false, true},
-		{config.ProxyLogPath(), config.Proxy.WriterType, config.Proxy.RotationPolicy, true, true},
-		{config.AccessLogPath(), config.AccessLog.WriterType, config.AccessLog.RotationPolicy, true, config.AccessLog.Enabled},
+		{
+			path:     config.ServerLogPath(),
+			writer:   config.Server.WriterType,
+			policy:   config.Server.RotationPolicy,
+			external: false,
+			enabled:  true,
+		},
+		{
+			path:     config.ProxyLogPath(),
+			writer:   config.Proxy.WriterType,
+			policy:   config.Proxy.RotationPolicy,
+			external: true,
+			enabled:  true,
+		},
+		{
+			path:     config.AccessLogPath(),
+			writer:   config.AccessLog.WriterType,
+			policy:   config.AccessLog.RotationPolicy,
+			external: true,
+			enabled:  config.AccessLog.Enabled,
+		},
 	}
 	for _, entry := range entries {
 		if !entry.enabled || entry.writer != "file" {
@@ -95,7 +141,12 @@ func NewLogging(config LoggingConfig) (*Logging, error) {
 		}
 		// Copy policies: callers cannot mutate running rotation via config pointers.
 		policy := *entry.policy
-		stream := &rotatingLog{path: entry.path, policy: policy, external: entry.external, since: time.Now()}
+		stream := &rotatingLog{
+			path:     entry.path,
+			policy:   policy,
+			external: entry.external,
+			since:    time.Now(),
+		}
 		info, err := regularLogInfo(entry.path)
 		if err != nil && !os.IsNotExist(err) {
 			l.Close()
@@ -135,7 +186,10 @@ func NewLogging(config LoggingConfig) (*Logging, error) {
 	return l, nil
 }
 
-func (l *Logging) Logger() *SimpleLogger { return l.logger }
+func (l *Logging) Logger() *SimpleLogger {
+	return l.logger
+}
+
 func (l *Logging) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -150,6 +204,7 @@ func (l *Logging) Run(ctx context.Context) {
 		}
 	}
 }
+
 func (l *Logging) Close() error {
 	l.rotationMu.Lock()
 	defer l.rotationMu.Unlock()
@@ -171,9 +226,11 @@ func (l *Logging) Close() error {
 	}
 	return result
 }
+
 func loggingError(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "task-proxy logging: "+format+"\n", args...)
 }
+
 func reopenEnvoyLogs() error {
 	client := http.Client{Timeout: 2 * time.Second}
 	response, err := client.Post("http://127.0.0.1:9901/reopen_logs", "text/plain", nil)

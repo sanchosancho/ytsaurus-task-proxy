@@ -276,18 +276,16 @@ func NewMetricsHandler(gatherer prometheus.Gatherer) http.Handler {
 	return mux
 }
 
-func ServeMetrics(gatherer prometheus.Gatherer, logger ...*SimpleLogger) error {
+func ServeMetrics(gatherer prometheus.Gatherer, logger *SimpleLogger) error {
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", metricsPort),
 		Handler:           NewMetricsHandler(gatherer),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	startupLogger := &SimpleLogger{}
-	if len(logger) > 0 && logger[0] != nil {
-		startupLogger = logger[0]
+	if logger != nil {
+		logger.Infof("metrics HTTP starts listening on :%d", metricsPort)
 	}
-	startupLogger.Infof("metrics HTTP starts listening on :%d", metricsPort)
 
 	return srv.ListenAndServe()
 }
